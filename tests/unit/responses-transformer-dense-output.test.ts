@@ -19,7 +19,8 @@ const encoder = new TextEncoder();
 const decoder = new TextDecoder();
 
 async function runTransformStream(chunks) {
-  const stream = createResponsesApiTransformStream();
+  const opts = arguments.length > 1 ? arguments[1] : {};
+  const stream = createResponsesApiTransformStream(null, undefined, opts);
   const writer = stream.writable.getWriter();
   const reader = stream.readable.getReader();
 
@@ -126,4 +127,61 @@ test("response.completed output preserves dense ordering for function_call-only 
   // Sorted by output_index: index 1 (alpha) before index 3 (zeta)
   assert.equal(completed.output[0].name, "alpha", "output_index 1 (alpha) must come first");
   assert.equal(completed.output[1].name, "zeta", "output_index 3 (zeta) must come second");
+});
+
+test("response.completed synthesizes a compaction output item when compactionRequested", async () => {
+  // Codex sends a `compaction_trigger` input item and expects exactly one
+  // matching `compaction` output item in the response. The Chat Completions
+  // upstream produces only a regular message, so the transformer must inject
+  // the synthetic marker.
+  const output = await runTransformStream(
+    [
+      `data: {"id":"chatcmpl-cmp","choices":[{"index":0,"delta":{"content":"ok"}}]}\n\n`,
+      `data: {"id":"chatcmpl-cmp","choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}\n\n`,
+    ],
+    { compactionRequested: true }
+  );
+
+  const completed = getCompleted(output);
+
+  const compactionItems = completed.output.filter((item) => item.type === "compaction");
+  assert.equal(
+    compactionItems.length,
+    1,
+    "exactly one compaction output item is expected"
+  );
+  assert.match(compactionItems[0].id, /^compaction_/);
+  assert.equal(typeof compactionItems[0].encrypted_content, "string");
+  assert.equal(
+    typeof compactionItems[0].output_index,
+    "number",
+    "compaction item must carry an output_index"
+  );
+
+  // Message item must still be present and keep its original output_index
+  const messageItems = completed.output.filter((item) => item.type === "message");
+  assert.equal(messageItems.length, 1);
+  assert.equal(messageItems[0].content[0].text, "ok");
+  // compaction appears after the message in the dense output array (its
+  // output_index is one higher than the last real item, so it sorts last)
+  const msgIndex = completed.output.indexOf(messageItems[0]);
+  const compIndex = completed.output.indexOf(compactionItems[0]);
+  assert.ok(
+    compIndex > msgIndex,
+    "compaction item must be appended after the existing message"
+  );
+});
+
+test("response.completed omits the compaction output item when compactionRequested is false", async () => {
+  // Default: no compaction trigger upstream, so no synthetic item should be added.
+  const output = await runTransformStream([
+    `data: {"id":"chatcmpl-nocmp","choices":[{"index":0,"delta":{"content":"hi"}}]}\n\n`,
+    `data: {"id":"chatcmpl-nocmp","choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}\n\n`,
+  ]);
+
+  const completed = getCompleted(output);
+  assert.equal(
+    completed.output.filter((item) => item.type === "compaction").length,
+    0
+  );
 });

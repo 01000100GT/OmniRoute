@@ -38,6 +38,16 @@ export async function handleResponsesCore({
 }) {
   const inputItems = Array.isArray(body?.input) ? body.input : [];
   const customToolNames = collectResponsesCustomToolNames(body?.tools, inputItems);
+  // Codex inserts `compaction_trigger` items when it compacts conversation
+  // context. The upstream chat-completions model produces no matching
+  // `compaction` output item, so the response transformer must synthesize one
+  // or the client throws "expected exactly one compaction output item".
+  const compactionRequested = inputItems.some(
+    (item) =>
+      item != null &&
+      typeof item === "object" &&
+      (item as { type?: unknown }).type === "compaction_trigger"
+  );
 
   // Convert Responses API format to Chat Completions format
   const convertedBody = convertResponsesApiFormat(body, credentials, modelInfo?.provider);
@@ -80,7 +90,10 @@ export async function handleResponsesCore({
   }
 
   // Transform SSE stream to Responses API format (no logging in worker)
-  const transformStream = createResponsesApiTransformStream(null, undefined, { customToolNames });
+  const transformStream = createResponsesApiTransformStream(null, undefined, {
+    customToolNames,
+    compactionRequested,
+  });
   const transformedBody = response.body.pipeThrough(transformStream).pipeThrough(
     createSseHeartbeatTransform({
       signal,

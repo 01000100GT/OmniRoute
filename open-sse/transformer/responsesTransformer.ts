@@ -80,7 +80,7 @@ export function createResponsesLogger(model, logsDir = null) {
  * Create TransformStream that converts Chat Completions SSE to Responses API SSE
  * @param {Object} logger - Optional logger instance
  * @param {number} keepaliveIntervalMs - Keepalive interval in milliseconds
- * @param {{ customToolNames?: Iterable<string> }} options - Original Responses tool metadata
+ * @param {{ customToolNames?: Iterable<string>, compactionRequested?: boolean }} options - Original Responses tool metadata
  * @returns {TransformStream}
  */
 export function createResponsesApiTransformStream(
@@ -89,6 +89,12 @@ export function createResponsesApiTransformStream(
   options = {}
 ) {
   const customToolNames = new Set(options.customToolNames || []);
+  // When the request contained a Codex `compaction_trigger` input item, the
+  // client expects exactly one synthetic `compaction` output item in the
+  // response. The upstream chat-completions model produces no such item by
+  // itself, so we inject one at response-completed time. Set via the handler
+  // that already inspected the Responses API input array.
+  const compactionRequested = options.compactionRequested === true;
   const state = {
     seq: 0,
     responseId: `resp_${Date.now()}`,
@@ -408,6 +414,24 @@ export function createResponsesApiTransformStream(
       // Build a dense, deterministic output array from items recorded as they were emitted.
       // Sorted by output_index then by emission sequence for stable ordering.
       const output = buildDenseOutput();
+
+      // Codex `compaction_trigger` parity: the client expects exactly one
+      // compaction output item in the response. Chat-completions providers do
+      // not produce one, so synthesize a minimal marker at the highest
+      // output_index (sorted to the end) so the client finds it without
+      // disturbing the indices of the real message / reasoning items.
+      if (compactionRequested) {
+        const compactionIndex =
+          output.length > 0
+            ? Math.max(...output.map((o) => Number(o.output_index) || 0)) + 1
+            : 0;
+        output.push({
+          id: `compaction_${state.responseId}`,
+          type: "compaction",
+          output_index: compactionIndex,
+          encrypted_content: "",
+        });
+      }
 
       const response: Record<string, unknown> = {
         id: state.responseId,
