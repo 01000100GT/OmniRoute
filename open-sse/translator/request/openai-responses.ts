@@ -414,6 +414,16 @@ export function openaiResponsesToOpenAIRequest(
       continue;
     }
 
+    // Skip compaction_trigger items. Codex inserts these when it compacts the
+    // conversation context (summarising prior turns to stay within the model's
+    // context window). The item is a Responses-API-only signal — the actual
+    // compacted history already arrives as regular message items. Carrying no
+    // content that Chat Completions can represent, it is silently dropped,
+    // matching the policy for reasoning / tool_search metadata items.
+    if (itemType === "compaction_trigger") {
+      continue;
+    }
+
     if (itemType === "additional_tools") {
       // Already consumed by collectResponsesTools() before message conversion.
       continue;

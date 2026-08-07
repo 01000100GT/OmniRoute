@@ -172,6 +172,25 @@ test("Responses -> Chat converts refusal history to valid Chat text content", ()
   ]);
 });
 
+test("Responses -> Chat skips compaction_trigger items from Codex context compaction", () => {
+  const result = translate({
+    input: [
+      { type: "message", role: "user", content: [{ type: "input_text", text: "First turn" }] },
+      { type: "message", role: "assistant", content: [{ type: "output_text", text: "Reply" }] },
+      { type: "compaction_trigger", reason: "context_window_exceeded" },
+      { type: "message", role: "user", content: [{ type: "input_text", text: "After compaction" }] },
+    ],
+  });
+
+  const messages = result.messages as Array<Record<string, unknown>>;
+  // compaction_trigger is dropped; only the 3 real messages survive
+  assert.equal(messages.length, 3);
+  assert.ok(
+    messages.every((m) => m.role !== undefined),
+    "no stray metadata items leaked into messages"
+  );
+});
+
 test("Responses -> Chat strips Responses-only execution and cache fields", () => {
   const result = translate({
     input: "Hello",
