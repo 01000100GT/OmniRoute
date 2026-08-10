@@ -2645,9 +2645,15 @@ export function createSSEStream(options: StreamOptions = {}) {
             if (!failureHandled) {
               clearPendingRequestFromStream();
             }
-            controller.error(
-              markPendingRequestCleared(new Error(err.message || "Upstream failure"))
-            );
+            if (sourceFormat === FORMATS.OPENAI_RESPONSES && state?.completedSent) {
+              try {
+                controller.close();
+              } catch {}
+            } else {
+              controller.error(
+                markPendingRequestCleared(new Error(err.message || "Upstream failure"))
+              );
+            }
             return;
           }
 

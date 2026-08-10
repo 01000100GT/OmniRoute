@@ -3313,7 +3313,13 @@ export async function handleChatCore({
       });
       persistFailureUsage(HTTP_STATUS.RATE_LIMITED, error.code);
       const result = stream
-        ? createStreamingErrorResult(HTTP_STATUS.RATE_LIMITED, failureMessage, error.code)
+        ? createStreamingErrorResult(
+            HTTP_STATUS.RATE_LIMITED,
+            failureMessage,
+            error.code,
+            undefined,
+            clientResponseFormat
+          )
         : createErrorResult(HTTP_STATUS.RATE_LIMITED, failureMessage);
       return {
         ...result,
@@ -3398,7 +3404,8 @@ export async function handleChatCore({
         failureStatus,
         failureMessage,
         upstreamErrorCode,
-        upstreamErrorType
+        upstreamErrorType,
+        clientResponseFormat
       );
       return {
         ...result,
