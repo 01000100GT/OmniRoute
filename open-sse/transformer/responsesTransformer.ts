@@ -411,27 +411,42 @@ export function createResponsesApiTransformStream(
     if (!state.completedSent) {
       state.completedSent = true;
 
-      // Build a dense, deterministic output array from items recorded as they were emitted.
-      // Sorted by output_index then by emission sequence for stable ordering.
-      const output = buildDenseOutput();
-
       // Codex `compaction_trigger` parity: the client expects exactly one
       // compaction output item in the response. Chat-completions providers do
       // not produce one, so synthesize a minimal marker at the highest
       // output_index (sorted to the end) so the client finds it without
       // disturbing the indices of the real message / reasoning items.
-      if (compactionRequested) {
+      if (compactionRequested && !state.compactionItemEmitted) {
+        state.compactionItemEmitted = true;
         const compactionIndex =
-          output.length > 0
-            ? Math.max(...output.map((o) => Number(o.output_index) || 0)) + 1
+          state.completedOutputItems.length > 0
+            ? Math.max(...state.completedOutputItems.map((o) => Number(o.output_index) || 0)) + 1
             : 0;
-        output.push({
+
+        const compactionItem = {
           id: `compaction_${state.responseId}`,
           type: "compaction",
-          output_index: compactionIndex,
           encrypted_content: "",
+        };
+
+        emit(controller, "response.output_item.added", {
+          type: "response.output_item.added",
+          output_index: compactionIndex,
+          item: compactionItem,
         });
+
+        emit(controller, "response.output_item.done", {
+          type: "response.output_item.done",
+          output_index: compactionIndex,
+          item: compactionItem,
+        });
+
+        recordCompletedItem(compactionIndex, compactionItem);
       }
+
+      // Build a dense, deterministic output array from items recorded as they were emitted.
+      // Sorted by output_index then by emission sequence for stable ordering.
+      const output = buildDenseOutput();
 
       const response: Record<string, unknown> = {
         id: state.responseId,
