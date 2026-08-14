@@ -18,8 +18,8 @@ const { createResponsesApiTransformStream } =
 const encoder = new TextEncoder();
 const decoder = new TextDecoder();
 
-async function runTransformStream(chunks) {
-  const stream = createResponsesApiTransformStream();
+async function runTransformStream(chunks, options = {}) {
+  const stream = createResponsesApiTransformStream(null, 3000, options);
   const writer = stream.writable.getWriter();
   const reader = stream.readable.getReader();
 
@@ -106,6 +106,33 @@ test("response.completed output includes all finalized items even when output is
 
   assert.ok(Array.isArray(completed.output), "output must be an array even when empty");
   assert.equal(completed.output.length, 0, "output must be empty when no items finalize");
+});
+
+test("compaction requests emit exactly one compaction output item", async () => {
+  const output = await runTransformStream(
+    [
+      `data: {"id":"chatcmpl-compact","choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}\n\n`,
+    ],
+    { compactionRequested: true }
+  );
+  const events = parseSseOutput(output);
+  const compactionEvents = events.filter((event) => {
+    if (!event.data || event.data === "[DONE]") return false;
+    const parsed = JSON.parse(event.data);
+    return parsed.item?.type === "compaction";
+  });
+  const completed = getCompleted(output);
+
+  assert.equal(
+    compactionEvents.length,
+    2,
+    "expected added and done events for one compaction item"
+  );
+  assert.equal(
+    completed.output.filter((item) => item.type === "compaction").length,
+    1,
+    "response.completed must include exactly one compaction item"
+  );
 });
 
 test("response.completed output preserves dense ordering for function_call-only streams", async () => {

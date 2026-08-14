@@ -658,6 +658,34 @@ function sendCompleted(state, emit) {
   if (!state.completedSent) {
     state.completedSent = true;
 
+    // The Chat Completions upstream has no Responses equivalent for a
+    // compaction trigger. Emit exactly one marker so Codex can complete the
+    // remote-compaction operation and carry the result into the next turn.
+    if (state.compactionRequested && !state.compactionItemEmitted) {
+      state.compactionItemEmitted = true;
+      const compactionIndex =
+        Array.isArray(state.completedOutputItems) && state.completedOutputItems.length > 0
+          ? Math.max(...state.completedOutputItems.map((o) => Number(o.output_index) || 0)) + 1
+          : 0;
+      const compactionItem = {
+        id: `compaction_${state.responseId}`,
+        type: "compaction",
+        encrypted_content: "",
+      };
+
+      emit("response.output_item.added", {
+        type: "response.output_item.added",
+        output_index: compactionIndex,
+        item: compactionItem,
+      });
+      emit("response.output_item.done", {
+        type: "response.output_item.done",
+        output_index: compactionIndex,
+        item: compactionItem,
+      });
+      recordCompletedItem(state, compactionIndex, compactionItem);
+    }
+
     // Build a dense, deterministic output array from items recorded as they were emitted
     // (each close*() call records its item via recordCompletedItem — including the
     // #1007 custom_tool_call shape for apply_patch). Sorted by output_index then by

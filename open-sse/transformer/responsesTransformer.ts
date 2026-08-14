@@ -80,7 +80,7 @@ export function createResponsesLogger(model, logsDir = null) {
  * Create TransformStream that converts Chat Completions SSE to Responses API SSE
  * @param {Object} logger - Optional logger instance
  * @param {number} keepaliveIntervalMs - Keepalive interval in milliseconds
- * @param {{ customToolNames?: Iterable<string> }} options - Original Responses tool metadata
+ * @param {{ customToolNames?: Iterable<string>, compactionRequested?: boolean }} options - Original Responses tool metadata
  * @returns {TransformStream}
  */
 export function createResponsesApiTransformStream(
@@ -89,6 +89,7 @@ export function createResponsesApiTransformStream(
   options = {}
 ) {
   const customToolNames = new Set(options.customToolNames || []);
+  const compactionRequested = options.compactionRequested === true;
   const state = {
     seq: 0,
     responseId: `resp_${Date.now()}`,
@@ -119,6 +120,7 @@ export function createResponsesApiTransformStream(
     }>,
     buffer: "",
     completedSent: false,
+    compactionItemEmitted: false,
     usage: null,
     keepaliveTimer: null,
     // #6906: true once a finish_reason chunk closed all output items but deferred
@@ -404,6 +406,33 @@ export function createResponsesApiTransformStream(
   const sendCompleted = (controller) => {
     if (!state.completedSent) {
       state.completedSent = true;
+
+      // Chat Completions providers cannot produce the Responses-only
+      // `compaction` item required by Codex after a compaction trigger.
+      if (compactionRequested && !state.compactionItemEmitted) {
+        state.compactionItemEmitted = true;
+        const compactionIndex =
+          state.completedOutputItems.length > 0
+            ? Math.max(...state.completedOutputItems.map((o) => Number(o.output_index) || 0)) + 1
+            : 0;
+        const compactionItem = {
+          id: `compaction_${state.responseId}`,
+          type: "compaction",
+          encrypted_content: "",
+        };
+
+        emit(controller, "response.output_item.added", {
+          type: "response.output_item.added",
+          output_index: compactionIndex,
+          item: compactionItem,
+        });
+        emit(controller, "response.output_item.done", {
+          type: "response.output_item.done",
+          output_index: compactionIndex,
+          item: compactionItem,
+        });
+        recordCompletedItem(compactionIndex, compactionItem);
+      }
 
       // Build a dense, deterministic output array from items recorded as they were emitted.
       // Sorted by output_index then by emission sequence for stable ordering.

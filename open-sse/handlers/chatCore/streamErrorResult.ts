@@ -23,17 +23,39 @@ export function createStreamingErrorResult(
   statusCode: number,
   message: string,
   code?: string,
-  type?: string
+  type?: string,
+  clientResponseFormat?: string | null
 ) {
-  const errorBody = buildErrorBody(statusCode, message);
-  if (code) {
-    errorBody.error.code = code;
-  }
-  if (type) {
-    errorBody.error.type = type;
-  }
+  let body: string;
+  if (clientResponseFormat === "openai-responses") {
+    const responseId = `resp_err_${Date.now()}`;
+    const response = {
+      id: responseId,
+      object: "response",
+      created_at: Math.floor(Date.now() / 1000),
+      status: "failed",
+      background: false,
+      error: {
+        code: code || String(statusCode),
+        message,
+      },
+      output: [],
+    };
+    body = `event: response.completed\ndata: ${JSON.stringify({
+      type: "response.completed",
+      response,
+    })}\n\n`;
+  } else {
+    const errorBody = buildErrorBody(statusCode, message);
+    if (code) {
+      errorBody.error.code = code;
+    }
+    if (type) {
+      errorBody.error.type = type;
+    }
 
-  const body = `data: ${JSON.stringify(errorBody)}\n\ndata: [DONE]\n\n`;
+    body = `data: ${JSON.stringify(errorBody)}\n\ndata: [DONE]\n\n`;
+  }
 
   return {
     success: false as const,

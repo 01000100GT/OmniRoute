@@ -646,6 +646,12 @@ export async function handleChatCore({
     body?.tools,
     responsesInputItems
   );
+  const compactionRequested = responsesInputItems.some(
+    (item) =>
+      item != null &&
+      typeof item === "object" &&
+      (item as { type?: unknown }).type === "compaction_trigger"
+  );
 
   // Check for bypass patterns (warmup, skip) - return fake response
   const bypassResponse = handleBypassRequest(body, model, userAgent);
@@ -3303,7 +3309,13 @@ export async function handleChatCore({
       });
       persistFailureUsage(HTTP_STATUS.RATE_LIMITED, error.code);
       const result = stream
-        ? createStreamingErrorResult(HTTP_STATUS.RATE_LIMITED, failureMessage, error.code)
+        ? createStreamingErrorResult(
+            HTTP_STATUS.RATE_LIMITED,
+            failureMessage,
+            error.code,
+            undefined,
+            clientResponseFormat
+          )
         : createErrorResult(HTTP_STATUS.RATE_LIMITED, failureMessage);
       return {
         ...result,
@@ -3388,7 +3400,8 @@ export async function handleChatCore({
         failureStatus,
         failureMessage,
         upstreamErrorCode,
-        upstreamErrorType
+        upstreamErrorType,
+        clientResponseFormat
       );
       return {
         ...result,
@@ -4928,10 +4941,10 @@ export async function handleChatCore({
       apiKeyInfo,
       handleStreamFailure,
       copilotCompatibleReasoning,
-      // openai-responses → openai translation still wants the namespace identity
-      // map for #7936-style round-trip closure when the client also speaks
-      // Responses (Codex CLI).
-      requestToolIdentityMap
+      false,
+      customToolNames,
+      requestToolIdentityMap,
+      compactionRequested
     );
   } else if (needsTranslation(targetFormat, clientResponseFormat)) {
     // Standard translation for other providers
@@ -4961,7 +4974,8 @@ export async function handleChatCore({
         clientResponseFormat,
       }),
       customToolNames,
-      requestToolIdentityMap
+      requestToolIdentityMap,
+      compactionRequested
     );
   } else {
     log?.debug?.("STREAM", `Standard passthrough mode`);
@@ -4976,7 +4990,8 @@ export async function handleChatCore({
       apiKeyInfo,
       handleStreamFailure,
       clientResponseFormat,
-      requestToolIdentityMap
+      requestToolIdentityMap,
+      compactionRequested
     );
   }
 

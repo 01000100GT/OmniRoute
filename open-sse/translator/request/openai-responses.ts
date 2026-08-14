@@ -414,6 +414,12 @@ export function openaiResponsesToOpenAIRequest(
       continue;
     }
 
+    // Codex uses this Responses-only marker to request context compaction. It
+    // has no Chat Completions equivalent and carries no user-visible content.
+    if (itemType === "compaction_trigger" || itemType === "compaction") {
+      continue;
+    }
+
     if (itemType === "additional_tools") {
       // Already consumed by collectResponsesTools() before message conversion.
       continue;

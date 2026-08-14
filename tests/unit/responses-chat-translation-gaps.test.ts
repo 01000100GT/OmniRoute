@@ -138,6 +138,20 @@ test("Responses -> Chat rejects input item types without a lossless Chat equival
   }
 });
 
+test("Responses -> Chat skips compaction metadata items", () => {
+  const result = translate({
+    input: [
+      { type: "compaction", encrypted_content: "omniroute-compaction-v1:test" },
+      { type: "compaction_trigger" },
+      { type: "message", role: "user", content: [{ type: "input_text", text: "Continue" }] },
+    ],
+  });
+
+  assert.deepEqual(result.messages, [
+    { role: "user", content: [{ type: "text", text: "Continue" }] },
+  ]);
+});
+
 test("Responses -> Chat consumes additional_tools input items without emitting messages", () => {
   const result = translate({
     input: [

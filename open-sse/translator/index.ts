@@ -694,6 +694,7 @@ export function initState(sourceFormat) {
       funcItemDone: {},
       completedOutputItems: [],
       completedSent: false,
+      compactionItemEmitted: false,
     };
   }
 

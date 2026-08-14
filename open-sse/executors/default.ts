@@ -512,7 +512,7 @@ export class DefaultExecutor extends BaseExecutor {
 
   /**
    * Downgrade `response_format: { type: "json_schema" }` to `json_object` for
-   * `openai-compatible-*` providers, injecting the JSON schema into the system
+   * `openai-compatible-*` and DeepSeek providers, injecting the JSON schema into the system
    * prompt instead. DeepSeek / Ollama / local OpenAI-compatible models often
    * lack native Structured Output and return empty or malformed content when a
    * `json_schema` response_format is forwarded as-is. Gated on the
@@ -520,7 +520,9 @@ export class DefaultExecutor extends BaseExecutor {
    * Output support keep the native `json_schema` path.
    */
   applyJsonSchemaFallback<T>(body: T): T {
-    if (!this.provider?.startsWith?.("openai-compatible-")) return body;
+    if (!this.provider?.startsWith?.("openai-compatible-") && this.provider !== "deepseek") {
+      return body;
+    }
     if (!body || typeof body !== "object" || Array.isArray(body)) return body;
 
     const record = body as Record<string, unknown>;
