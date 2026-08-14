@@ -634,7 +634,7 @@ function getContentBlocksFromMessage(
               type: "tool_use",
               id: sanitizeToolId(part.id),
               name: part.name,
-              input: part.input,
+              input: normalizeToolUseInput(part.input),
             });
           }
         }
@@ -659,7 +659,7 @@ function getContentBlocksFromMessage(
             type: "tool_use",
             id: sanitizeToolId(tc.id),
             name: toolName,
-            input: tryParseJSON(tc.function.arguments),
+            input: normalizeToolUseInput(tc.function.arguments),
           });
         }
       }
@@ -744,9 +744,14 @@ function extractTextContent(content) {
   return "";
 }
 
-// Try parse JSON (passthrough fallback: return the raw input string on parse error).
-function tryParseJSON(str: unknown): unknown {
-  return safeParseJSON(str, str);
+// Anthropic-compatible APIs require tool_use.input to be a JSON object. Responses
+// histories may instead replay an encoded JSON string or a malformed/partial value.
+function normalizeToolUseInput(value: unknown): Record<string, unknown> {
+  const parsed = safeParseJSON(value, null);
+  if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+    return parsed as Record<string, unknown>;
+  }
+  return {};
 }
 
 function stripCacheControl(value: unknown): unknown {
