@@ -658,6 +658,39 @@ function sendCompleted(state, emit) {
   if (!state.completedSent) {
     state.completedSent = true;
 
+    // Codex `compaction_trigger` parity: the client expects exactly one
+    // `compaction` output item in the response. The upstream Chat Completions
+    // provider cannot produce one, so synthesize a minimal marker appended at
+    // the highest output_index — sorted to the end without disturbing the
+    // indices of the real message / reasoning / function-call items.
+    if (state.compactionRequested && !state.compactionItemEmitted) {
+      state.compactionItemEmitted = true;
+      const compactionIndex =
+        Array.isArray(state.completedOutputItems) && state.completedOutputItems.length > 0
+          ? Math.max(...state.completedOutputItems.map((o) => Number(o.output_index) || 0)) + 1
+          : 0;
+
+      const compactionItem = {
+        id: `compaction_${state.responseId}`,
+        type: "compaction",
+        encrypted_content: "",
+      };
+
+      emit("response.output_item.added", {
+        type: "response.output_item.added",
+        output_index: compactionIndex,
+        item: compactionItem,
+      });
+
+      emit("response.output_item.done", {
+        type: "response.output_item.done",
+        output_index: compactionIndex,
+        item: compactionItem,
+      });
+
+      recordCompletedItem(state, compactionIndex, compactionItem);
+    }
+
     // Build a dense, deterministic output array from items recorded as they were emitted
     // (each close*() call records its item via recordCompletedItem — including the
     // #1007 custom_tool_call shape for apply_patch). Sorted by output_index then by

@@ -179,6 +179,8 @@ type TranslateState = ReturnType<typeof initState> & {
     code: string;
     message: string;
   } | null;
+  /** Codex compaction_trigger parity: synthesize a compaction output item. */
+  compactionRequested?: boolean;
 };
 
 type ToolCall = {
@@ -686,6 +688,7 @@ export function createSSEStream(options: StreamOptions = {}) {
     dropResponsesCommentary,
     customToolNames = new Set<string>(),
     requestToolIdentityMap = null,
+    compactionRequested = false,
   } = options;
   const signatureNamespace = connectionId;
   // Request-body-size metric (for monitoring payload size distribution & correlation with TTFT).
@@ -763,6 +766,7 @@ export function createSSEStream(options: StreamOptions = {}) {
           toolSchemas: extractToolSchemaMap(body),
           customToolNames,
           requestToolIdentityMap,
+          compactionRequested,
         }
       : null;
 
@@ -2641,9 +2645,15 @@ export function createSSEStream(options: StreamOptions = {}) {
             if (!failureHandled) {
               clearPendingRequestFromStream();
             }
-            controller.error(
-              markPendingRequestCleared(new Error(err.message || "Upstream failure"))
-            );
+            if (sourceFormat === FORMATS.OPENAI_RESPONSES && state?.completedSent) {
+              try {
+                controller.close();
+              } catch {}
+            } else {
+              controller.error(
+                markPendingRequestCleared(new Error(err.message || "Upstream failure"))
+              );
+            }
             return;
           }
 
@@ -2830,7 +2840,8 @@ export function createSSETransformStreamWithLogger(
   copilotCompatibleReasoning = false,
   suppressThinkClose = false,
   customToolNames: ReadonlySet<string> = new Set(),
-  requestToolIdentityMap: Map<string, { namespace: string; name: string }> | null = null
+  requestToolIdentityMap: Map<string, { namespace: string; name: string }> | null = null,
+  compactionRequested = false
 ) {
   return createSSEStream({
     mode: STREAM_MODE.TRANSLATE,
@@ -2849,6 +2860,7 @@ export function createSSETransformStreamWithLogger(
     suppressThinkClose,
     customToolNames,
     requestToolIdentityMap,
+    compactionRequested,
   });
 }
 
@@ -2863,7 +2875,8 @@ export function createPassthroughStreamWithLogger(
   apiKeyInfo: unknown = null,
   onFailure: ((payload: StreamFailurePayload) => void | Promise<void>) | null = null,
   clientResponseFormat: string | null = null,
-  requestToolIdentityMap: Map<string, { namespace: string; name: string }> | null = null
+  requestToolIdentityMap: Map<string, { namespace: string; name: string }> | null = null,
+  compactionRequested = false
 ) {
   return createSSEStream({
     mode: STREAM_MODE.PASSTHROUGH,
@@ -2878,6 +2891,7 @@ export function createPassthroughStreamWithLogger(
     onFailure,
     clientResponseFormat,
     requestToolIdentityMap,
+    compactionRequested,
   });
 }
 

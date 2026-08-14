@@ -278,6 +278,79 @@ test("OpenAI -> Responses: escapeJsonStringValues fixes literal newlines in tool
   }
 });
 
+test("Responses translator synthesizes a compaction output item when compactionRequested", () => {
+  const state = initState(FORMATS.OPENAI_RESPONSES);
+  state.compactionRequested = true;
+
+  const events = [];
+  const first = openaiToOpenAIResponsesResponse(
+    {
+      id: "chatcmpl-cmp",
+      choices: [{ index: 0, delta: { content: "ok" }, finish_reason: null }],
+    },
+    state
+  );
+  if (first) events.push(...first);
+
+  const finish = openaiToOpenAIResponsesResponse(
+    {
+      id: "chatcmpl-cmp",
+      choices: [{ index: 0, delta: {}, finish_reason: "stop" }],
+    },
+    state
+  );
+  if (finish) events.push(...finish);
+
+  // Force the terminal flush so response.completed is emitted
+  const flush = openaiToOpenAIResponsesResponse(null, state);
+  if (flush) events.push(...flush);
+
+  const completedEvent = events.find((e) => e.event === "response.completed");
+  assert.ok(completedEvent, "response.completed must be emitted");
+
+  const response = completedEvent.data.response;
+  const compactionItems = response.output.filter((item) => item.type === "compaction");
+  assert.equal(compactionItems.length, 1, "exactly one compaction output item is expected");
+  assert.match(compactionItems[0].id, /^compaction_/);
+  assert.equal(typeof compactionItems[0].encrypted_content, "string");
+
+  // Real message item is preserved and compaction sorts to the end
+  const messageItems = response.output.filter((item) => item.type === "message");
+  assert.equal(messageItems.length, 1);
+  assert.equal(messageItems[0].content[0].text, "ok");
+  assert.ok(response.output.indexOf(compactionItems[0]) > response.output.indexOf(messageItems[0]));
+});
+
+test("Responses translator omits compaction output item by default", () => {
+  const state = initState(FORMATS.OPENAI_RESPONSES);
+  const events = [];
+  const first = openaiToOpenAIResponsesResponse(
+    {
+      id: "chatcmpl-nocmp",
+      choices: [{ index: 0, delta: { content: "hi" }, finish_reason: null }],
+    },
+    state
+  );
+  if (first) events.push(...first);
+  const finish = openaiToOpenAIResponsesResponse(
+    {
+      id: "chatcmpl-nocmp",
+      choices: [{ index: 0, delta: {}, finish_reason: "stop" }],
+    },
+    state
+  );
+  if (finish) events.push(...finish);
+  const flush = openaiToOpenAIResponsesResponse(null, state);
+  if (flush) events.push(...flush);
+
+  const completedEvent = events.find((e) => e.event === "response.completed");
+  assert.ok(completedEvent, "response.completed must be emitted");
+  assert.equal(
+    completedEvent.data.response.output.filter((item) => item.type === "compaction").length,
+    0
+  );
+});
+
 test("Responses -> OpenAI: response.failed records upstream error", () => {
   const state = {};
   const result = openaiResponsesToOpenAIResponse(

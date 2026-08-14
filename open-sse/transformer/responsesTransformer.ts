@@ -80,7 +80,7 @@ export function createResponsesLogger(model, logsDir = null) {
  * Create TransformStream that converts Chat Completions SSE to Responses API SSE
  * @param {Object} logger - Optional logger instance
  * @param {number} keepaliveIntervalMs - Keepalive interval in milliseconds
- * @param {{ customToolNames?: Iterable<string> }} options - Original Responses tool metadata
+ * @param {{ customToolNames?: Iterable<string>, compactionRequested?: boolean }} options - Original Responses tool metadata
  * @returns {TransformStream}
  */
 export function createResponsesApiTransformStream(
@@ -89,6 +89,12 @@ export function createResponsesApiTransformStream(
   options = {}
 ) {
   const customToolNames = new Set(options.customToolNames || []);
+  // When the request contained a Codex `compaction_trigger` input item, the
+  // client expects exactly one synthetic `compaction` output item in the
+  // response. The upstream chat-completions model produces no such item by
+  // itself, so we inject one at response-completed time. Set via the handler
+  // that already inspected the Responses API input array.
+  const compactionRequested = options.compactionRequested === true;
   const state = {
     seq: 0,
     responseId: `resp_${Date.now()}`,
@@ -404,6 +410,39 @@ export function createResponsesApiTransformStream(
   const sendCompleted = (controller) => {
     if (!state.completedSent) {
       state.completedSent = true;
+
+      // Codex `compaction_trigger` parity: the client expects exactly one
+      // compaction output item in the response. Chat-completions providers do
+      // not produce one, so synthesize a minimal marker at the highest
+      // output_index (sorted to the end) so the client finds it without
+      // disturbing the indices of the real message / reasoning items.
+      if (compactionRequested && !state.compactionItemEmitted) {
+        state.compactionItemEmitted = true;
+        const compactionIndex =
+          state.completedOutputItems.length > 0
+            ? Math.max(...state.completedOutputItems.map((o) => Number(o.output_index) || 0)) + 1
+            : 0;
+
+        const compactionItem = {
+          id: `compaction_${state.responseId}`,
+          type: "compaction",
+          encrypted_content: "",
+        };
+
+        emit(controller, "response.output_item.added", {
+          type: "response.output_item.added",
+          output_index: compactionIndex,
+          item: compactionItem,
+        });
+
+        emit(controller, "response.output_item.done", {
+          type: "response.output_item.done",
+          output_index: compactionIndex,
+          item: compactionItem,
+        });
+
+        recordCompletedItem(compactionIndex, compactionItem);
+      }
 
       // Build a dense, deterministic output array from items recorded as they were emitted.
       // Sorted by output_index then by emission sequence for stable ordering.
